@@ -1,0 +1,10 @@
+{
+  "name": "friendly-ai-netlify-functions",
+  "version": "1.0.0",
+  "description": "Netlify serverless functions for Friendly-AI - proxies requests to OpenRouter API securely.",
+  "private": true,
+  "main": "askAI.js",
+  "dependencies": {
+    "node-fetch": "^2.7.0"
+  }
+}

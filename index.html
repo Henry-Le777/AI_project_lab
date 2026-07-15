@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Friendly AI</title>
+
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+    <header id="site-header" class="site-header">
+
+        <h1 class="site-title">Friendly AI</h1>
+
+        <div class = "header-actions">
+            <button
+            id="theme-toggle-button"
+            type="button"
+            aria-label="Toggle theme">
+
+            🌙
+            </button>    
+            <nav id="auth-controls" class="auth-controls">
+
+                <div id="guest-actions" class="guest-actions">
+
+                    <button
+                        id="sign-in-button"
+                        type="button">
+
+                        Sign In
+
+                    </button>
+
+                    <button
+                        id="sign-up-button"
+                        type="button">
+
+                        Sign Up
+
+                    </button>
+
+                </div>
+
+                <div
+                    id="user-actions"
+                    class="user-actions"
+                    hidden>
+
+                    <div class="user-profile">
+
+                        <img
+                            id="user-avatar"
+                            src=""
+                            alt="User Avatar">
+
+                        <span id="username">
+                            Username
+                        </span>
+
+                    </div>
+
+                    <button
+                        id="sign-out-button"
+                        type="button">
+
+                        Sign Out
+
+                    </button>
+
+                </div>
+
+            </nav>
+        </div>
+
+    </header>
+
+    <main id="main-content">
+        
+        <section
+        id="assistant-section"
+        class="assistant-section">
+
+            <h2>Assistant</h2>
+
+            <div id="assistant-inner">
+                <div id="assistant-container">
+                    <h3 id="welcome-title">Welcome to Friendly AI Assistant</h3>
+
+                    <p id="welcome-message">Ask questions, explore projects, or chat with the assistant.</p>
+
+                    <p id="user-greeting">Please sign in to unlock personalized features.</p>
+
+                </div>
+            </div>
+
+        </section>
+
+        <section id="memory-section" class="memory-section">
+
+            <header class="memory-header">
+
+                <div>
+                    <h3>Memory</h3>
+                    <p class="memory-help">This memory stores a concise user summary that is saved to Firebase and reused in future chats.</p>
+                </div>
+
+                <button
+                    id="save-memory-button"
+                    type="button">
+
+                    Save
+
+                </button>
+
+            </header>
+
+            <textarea
+                id="memory-input"
+                placeholder="Edit the user summary or add preferences here..."
+                disabled></textarea>
+
+        </section>
+
+        <section id="context-section" class="memory-section">
+
+            <header class="memory-header">
+
+                <div>
+                    <h3>Conversation Context</h3>
+                    <p class="memory-help">This keeps the main topic of the conversation so the assistant stays focused and avoids drifting off-topic.</p>
+                </div>
+
+                <button
+                    id="save-context-button"
+                    type="button">
+
+                    Save
+
+                </button>
+
+            </header>
+
+            <textarea
+                id="conversation-context-input"
+                placeholder="Describe the current topic or goal of the conversation..."
+                disabled></textarea>
+
+        </section>
+
+        <section
+            id="history-section"
+            class="history-section">
+
+            <header class="section-header">
+
+                <h2>History</h2>
+
+                <button
+                    id="refresh-button"
+                    type="button">
+
+                    Refresh
+
+                </button>
+
+            </header>
+
+            <div
+                id="history-list"
+                class="history-list">
+
+            </div>
+
+        </section>
+
+        <section
+            id="interaction-section"
+            class="interaction-section">
+
+            <header class="section-header">
+
+                <h2>Interaction</h2>
+
+                <button
+                    id="save-button"
+                    type="button">
+
+                    Save
+
+                </button>
+
+            </header>
+
+            <section
+                id="response-section"
+                class="response-section">
+
+                <h3>Response</h3>
+
+                <div id="response-container">
+
+                </div>
+
+            </section>
+
+            <form
+                id="prompt-form">
+
+                <label for="prompt-input">
+                    Prompt
+                </label>
+
+                <textarea
+                    id="prompt-input"
+                    name="prompt"
+                    placeholder="Type your prompt here..."
+                    rows="5"
+                    required></textarea>
+
+                <button
+                    id="ask-button"
+                    type="submit">
+
+                    Ask
+
+                </button>
+
+            </form>
+
+        </section>
+
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$']],
+                displayMath: [['$$', '$$']]
+            }
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script type="module" src="js/main.js"></script>
+
+</body>
+</html>
