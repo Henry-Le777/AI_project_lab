@@ -3,17 +3,19 @@ const admin = require("firebase-admin");
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-
 if (!admin.apps.length) {
-    console.log("Firebase Admin check:", {
-    project: process.env.ADMIN_FIREBASE_PROJECT_ID,
-    email: process.env.FIREBASE_CLIENT_EMAIL,
-    hasKey: Boolean(process.env.FIREBASE_PRIVATE_KEY)
+  console.log("Firebase Admin ENV:", {
+    projectId: process.env.ADMIN_FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    hasPrivateKey: Boolean(process.env.FIREBASE_PRIVATE_KEY),
   });
+
   admin.initializeApp({
     credential: admin.credential.cert({
+      projectId: process.env.ADMIN_FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+      privateKey: (process.env.FIREBASE_PRIVATE_KEY || "")
+        .replace(/\\n/g, "\n"),
     }),
   });
 }
