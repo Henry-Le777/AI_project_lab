@@ -21,9 +21,8 @@ function getKeys() {
 }
 
 function getModels() {
-  const raw =
-    process.env.OPENROUTER_MODELS ||
-    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free,openrouter/auto,google/gemma-4-31b-it:free";
+  const raw = process.env.OPENROUTER_MODELS || "";
+
   return raw
     .split(",")
     .map((m) => m.trim())
