@@ -1,5 +1,17 @@
 
+const admin = require("firebase-admin");
+
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+    }),
+  });
+}
 
 function getKeys() {
   const raw = process.env.OPENROUTER_KEYS || "";
@@ -20,41 +32,6 @@ function getModels() {
 }
 
 
-async function verifyFirebaseToken(idToken) {
-  if (!idToken) {
-    throw new Error("No auth token provided");
-  }
-
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  if (!projectId) {
-    throw new Error("FIREBASE_PROJECT_ID is not configured");
-  }
-
-  const url = `https://www.googleapis.com/identitytoolkit/v3/relyingparty/getAccountInfo?key=${process.env.FIREBASE_API_KEY}`;
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken }),
-  });
-
-  if (!response.ok) {
-    throw new Error("Invalid or expired auth token");
-  }
-
-  const data = await response.json();
-  const user = data?.users?.[0];
-  if (!user) {
-    throw new Error("No user found for the provided token");
-  }
-
-  return {
-    uid: user.localId,
-    email: user.email,
-    displayName: user.displayName,
-  };
-}
-
 exports.handler = async (event, context) => {
   // Only allow POST
   if (event.httpMethod !== "POST") {
@@ -69,12 +46,24 @@ exports.handler = async (event, context) => {
   const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
 
   let user;
+
   try {
-    user = await verifyFirebaseToken(idToken);
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+
+    user = {
+      uid: decodedToken.uid,
+      email: decodedToken.email || "",
+      displayName: decodedToken.name || "",
+    };
   } catch (err) {
+    console.error(err);
+
     return {
       statusCode: 401,
-      body: JSON.stringify({ error: "unauthenticated", message: "You must be signed in to use Friendly-AI." }),
+      body: JSON.stringify({
+        error: "unauthenticated",
+        message: "You must be signed in to use Friendly-AI."
+      }),
     };
   }
 

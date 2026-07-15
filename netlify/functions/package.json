@@ -5,6 +5,7 @@
   "private": true,
   "main": "askAI.js",
   "dependencies": {
+    "firebase-admin": "^14.1.0",
     "node-fetch": "^2.7.0"
   }
 }
