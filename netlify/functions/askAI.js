@@ -1,18 +1,3 @@
-/**
- * Friendly-AI Netlify serverless function.
- *
- * This is the ONLY place the OpenRouter API key lives in production.
- * The browser never receives the key; it calls this endpoint instead.
- *
- * Environment variables (set in Netlify dashboard):
- *   OPENROUTER_KEYS = sk-or-v1-xxx,sk-or-v1-yyy,sk-or-v1-zzz
- *   OPENROUTER_MODELS = nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free,openrouter/auto,google/gemma-4-31b-it:free
- *   FIREBASE_PROJECT_ID = friendly-ai-ad09f
- *
- * The browser calls POST /.netlify/functions/askAI with:
- *   headers: { Authorization: "Bearer <firebase-id-token>" }
- *   body:    { messages: [{role:string, content:string}], temperature?:number, maxTokens?:number }
- */
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -34,10 +19,7 @@ function getModels() {
     .filter(Boolean);
 }
 
-/**
- * Verify a Firebase ID token using the Firebase Admin Auth REST API
- * (no Admin SDK dependency needed).
- */
+
 async function verifyFirebaseToken(idToken) {
   if (!idToken) {
     throw new Error("No auth token provided");
