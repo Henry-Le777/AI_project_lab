@@ -22,6 +22,7 @@ import {
     collection,
     query,
     orderBy,
+    limit,
     addDoc
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
 
@@ -114,8 +115,9 @@ async function renderMathJax(target) {
 function initialize() {
 
     console.log("main.js loaded");
-    saveMemoryButton.addEventListener("click",saveMemory);
+    saveMemoryButton.addEventListener("click", saveMemory);
     saveConversationContextButton.addEventListener("click", saveConversationContext);
+    saveButton.addEventListener("click", handleSaveInteraction);
     signInButton.addEventListener("click", handleGoogleLogin);
     signUpButton.addEventListener("click", handleGoogleLogin);
     signOutButton.addEventListener("click", handleSignOut);
@@ -193,7 +195,40 @@ async function loadHistory(user) {
 
 }
 
-async function saveConversation(prompt, answer) {
+async function handleSaveInteraction() {
+    const user = auth.currentUser;
+    if (!user) {
+        alert("Please sign in.");
+        return;
+    }
+
+    const prompt = toSafeText(promptInput.value);
+    const answer = toSafeText(responseContainer.textContent || responseContainer.innerText || "");
+
+    if (!prompt) {
+        alert("Please enter a prompt before saving.");
+        return;
+    }
+
+    if (!answer || answer === "Thinking..." || answer === "Something went wrong.") {
+        alert("There is no response to save yet.");
+        return;
+    }
+
+    saveButton.disabled = true;
+    try {
+        await saveConversationToFirestore(prompt, answer);
+        alert("Conversation saved.");
+        await loadHistory(user);
+    } catch (error) {
+        console.error("Save interaction error:", error);
+        alert("Could not save the conversation.");
+    } finally {
+        saveButton.disabled = false;
+    }
+}
+
+async function saveConversationToFirestore(prompt, answer) {
 
     const user = auth.currentUser;
 
@@ -426,7 +461,7 @@ async function handlePromptSubmit(event) {
     conversationContextInput.value = updatedConversationContext;
     await persistConversationContext(updatedConversationContext, auth.currentUser);
 
-    await saveConversation(prompt, answer);
+    await saveConversationToFirestore(prompt, answer);
     refreshButton.disabled = true;
 
     await loadHistory(auth.currentUser);
@@ -461,11 +496,12 @@ async function buildRecentHistoryContext(user) {
 
         const q = query(
             collection(db, "users", user.uid, "history"),
-            orderBy("createdAt", "desc")
+            orderBy("createdAt", "desc"),
+            limit(5)
         );
 
         const snapshot = await getDocs(q);
-        const recentItems = snapshot.docs.slice(0, 5).map((docSnapshot) => {
+        const recentItems = snapshot.docs.map((docSnapshot) => {
             const data = docSnapshot.data();
             return `User: ${String(data.prompt ?? "").replace(/\s+/g, " ").trim()}\nAssistant: ${String(data.answer ?? "").replace(/\s+/g, " ").trim()}`;
         });

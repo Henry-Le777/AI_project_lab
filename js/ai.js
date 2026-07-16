@@ -36,7 +36,9 @@ function getFunctionUrl() {
 export async function askAI(prompt, memory, username, conversationContext = "", historyContext = "", userEmail = "") {
     const displayName = typeof username === "string"
         ? username
-        : username?.textContent ?? "Guest";
+        : typeof username === "object" && username !== null
+            ? (username.textContent ?? "Guest")
+            : "Guest";
 
     try {
         // Get the current user's Firebase ID token for authentication
@@ -67,25 +69,42 @@ ${historyContext || "No recent history available."}
             { role: "user", content: prompt }
         ];
 
-        const response = await fetch(getFunctionUrl(), {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${idToken}`
-            },
-            body: JSON.stringify({
-                messages,
-                temperature: 0.7,
-                maxTokens: 2000
-            })
-        });
+        // Client-side timeout: 25s (generous buffer on top of server's 9.5s)
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+        let response;
+        try {
+            response = await fetch(getFunctionUrl(), {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${idToken}`
+                },
+                body: JSON.stringify({
+                    messages,
+                    temperature: 0.7,
+                    maxTokens: 2000
+                }),
+                signal: controller.signal,
+            });
+        } finally {
+            clearTimeout(timeoutId);
+        }
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            if (response.status === 401) {
-                return "Please sign in to continue.";
+
+            switch (response.status) {
+                case 401:
+                    return "Please sign in to continue.";
+                case 429:
+                    return "You're sending too many requests. Please wait a moment and try again.";
+                case 503:
+                    return "The AI service is temporarily unavailable. Please try again.";
+                default:
+                    throw new Error(errorData.message || `Server error (${response.status})`);
             }
-            throw new Error(errorData.message || `Server error (${response.status})`);
         }
 
         const result = await response.json();
@@ -98,6 +117,6 @@ ${historyContext || "No recent history available."}
         return content;
     } catch (error) {
         console.error("AI Error:", error);
-        return "Sorry, I couldn't generate a response. Please try again.";
+        throw new Error("Sorry, I couldn't generate a response. Please try again.");
     }
 }

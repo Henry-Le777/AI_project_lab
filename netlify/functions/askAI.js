@@ -1,23 +1,45 @@
-const admin = require("firebase-admin");
-
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-if (!admin.apps.length) {
-  console.log("Firebase Admin ENV:", {
-    projectId: process.env.ADMIN_FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    hasPrivateKey: Boolean(process.env.FIREBASE_PRIVATE_KEY),
-  });
+// ─── Configuration ───────────────────────────────────────────────────────────
+const REQUEST_TIMEOUT_MS = 8000;   // Per-provider timeout (8s)
+const MAX_ELAPSED_MS = 9500;       // Total function timeout buffer (9.5s < Netlify 10s)
+const MAX_PROMPT_LENGTH = 8000;     // Max characters per user message
+const MAX_MESSAGES = 20;           // Max messages in the array
+const MAX_INPUT_BYTES = 50000;     // Max total body size
+const CORS_ORIGIN = "https://friendly-ai-ad09f.firebaseapp.com";
+const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
+const RATE_LIMIT_MAX = 30;          // Max requests per window per IP
 
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.ADMIN_FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: (process.env.FIREBASE_PRIVATE_KEY || "")
-        .replace(/\\n/g, "\n"),
-    }),
-  });
+// ─── Simple in-memory rate limiter ───────────────────────────────────────────
+const rateLimitStore = new Map();
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  const record = rateLimitStore.get(ip);
+
+  if (!record || now - record.windowStart > RATE_LIMIT_WINDOW_MS) {
+    rateLimitStore.set(ip, { windowStart: now, count: 1 });
+    return false;
+  }
+
+  record.count += 1;
+  if (record.count > RATE_LIMIT_MAX) {
+    return true;
+  }
+  return false;
 }
+
+// ─── Periodic cleanup of old rate-limit entries ──────────────────────────────
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of rateLimitStore) {
+    if (now - record.windowStart > RATE_LIMIT_WINDOW_MS) {
+      rateLimitStore.delete(ip);
+    }
+  }
+}, 60000).unref();
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getKeys() {
   const raw = process.env.OPENROUTER_KEYS || "";
@@ -28,7 +50,9 @@ function getKeys() {
 }
 
 function getModels() {
-  const raw = process.env.OPENROUTER_MODELS || "";
+  const raw =
+    process.env.OPENROUTER_MODELS ||
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free,openrouter/auto";
 
   return raw
     .split(",")
@@ -36,68 +60,188 @@ function getModels() {
     .filter(Boolean);
 }
 
+async function verifyFirebaseToken(idToken) {
+  if (!idToken) {
+    throw new Error("No auth token provided");
+  }
+
+  const apiKey = process.env.FIREBASE_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("FIREBASE_API_KEY is not configured");
+  }
+
+  const response = await fetchWithTimeout(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ idToken }),
+    },
+    3000
+  );
+
+  if (!response.ok) {
+    throw new Error("Invalid or expired Firebase ID token");
+  }
+
+  const data = await response.json();
+  const user = data.users?.[0];
+
+  if (!user) {
+    throw new Error("User not found");
+  }
+
+  return {
+    uid: user.localId,
+    email: user.email || "",
+    displayName: user.displayName || "",
+  };
+}
+
+/**
+ * Fetch with a timeout. Throws if the request takes longer than `ms`.
+ */
+async function fetchWithTimeout(url, options, ms) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ms);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// ─── Main handler ────────────────────────────────────────────────────────────
 
 exports.handler = async (event, context) => {
-  // Only allow POST
+  const startTime = Date.now();
+
+  // ── CORS preflight ───────────────────────────────────────────────────────
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 204,
+      headers: {
+        "Access-Control-Allow-Origin": CORS_ORIGIN,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        "Access-Control-Max-Age": "86400",
+      },
+    };
+  }
+
+  // ── Method check ─────────────────────────────────────────────────────────
   if (event.httpMethod !== "POST") {
     return {
       statusCode: 405,
+      headers: { "Access-Control-Allow-Origin": CORS_ORIGIN },
       body: JSON.stringify({ error: "Method not allowed" }),
     };
   }
 
-  // 1. Authenticate: extract Firebase ID token from Authorization header
-  const authHeader = event.headers.authorization || event.headers.Authorization || "";
+  // ── Rate limiting ────────────────────────────────────────────────────────
+  const clientIp =
+    event.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    event.headers["client-ip"] ||
+    "unknown";
+
+  if (isRateLimited(clientIp)) {
+    console.warn(`Rate limited IP: ${clientIp}`);
+    return {
+      statusCode: 429,
+      headers: {
+        "Access-Control-Allow-Origin": CORS_ORIGIN,
+        "Retry-After": "60",
+      },
+      body: JSON.stringify({
+        error: "rate-limited",
+        message: "Too many requests. Please try again in a minute.",
+      }),
+    };
+  }
+
+  // ── Input size check ─────────────────────────────────────────────────────
+  const bodyRaw = event.body || "";
+  if (Buffer.byteLength(bodyRaw, "utf-8") > MAX_INPUT_BYTES) {
+    return {
+      statusCode: 413,
+      headers: { "Access-Control-Allow-Origin": CORS_ORIGIN },
+      body: JSON.stringify({ error: "payload-too-large", message: "Request body too large." }),
+    };
+  }
+
+  // ── Authenticate ─────────────────────────────────────────────────────────
+  const authHeader = event.headers.authorization || "";
   const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
 
   let user;
-
   try {
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-
-    user = {
-      uid: decodedToken.uid,
-      email: decodedToken.email || "",
-      displayName: decodedToken.name || "",
-    };
+    user = await verifyFirebaseToken(idToken);
   } catch (err) {
     console.error(err);
 
     return {
       statusCode: 401,
+      headers: { "Access-Control-Allow-Origin": CORS_ORIGIN },
       body: JSON.stringify({
         error: "unauthenticated",
-        message: "You must be signed in to use Friendly-AI."
+        message: "You must be signed in to use Friendly-AI.",
       }),
     };
   }
 
-  // 2. Parse request body
+  // ── Parse body ───────────────────────────────────────────────────────────
   let data;
   try {
-    data = JSON.parse(event.body || "{}");
+    data = JSON.parse(bodyRaw || "{}");
   } catch {
     return {
       statusCode: 400,
+      headers: { "Access-Control-Allow-Origin": CORS_ORIGIN },
       body: JSON.stringify({ error: "invalid-argument", message: "Invalid JSON body." }),
     };
   }
 
-  const messages = data?.messages;
+  // ── Validate messages ────────────────────────────────────────────────────
+  let messages = data?.messages;
   if (!Array.isArray(messages) || messages.length === 0) {
     return {
       statusCode: 400,
+      headers: { "Access-Control-Allow-Origin": CORS_ORIGIN },
       body: JSON.stringify({ error: "invalid-argument", message: "messages array is required." }),
     };
   }
 
+  // Enforce size limits
+  if (messages.length > MAX_MESSAGES) {
+    messages = messages.slice(-MAX_MESSAGES);
+  }
+
+  for (const msg of messages) {
+    if (typeof msg.content === "string" && msg.content.length > MAX_PROMPT_LENGTH) {
+      msg.content = msg.content.slice(0, MAX_PROMPT_LENGTH);
+    }
+  }
+
+  // ── Load keys & models ───────────────────────────────────────────────────
   const keys = getKeys();
   const models = getModels();
 
   if (keys.length === 0) {
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: "failed-precondition", message: "OpenRouter API key is not configured on the server." }),
+      headers: { "Access-Control-Allow-Origin": CORS_ORIGIN },
+      body: JSON.stringify({
+        error: "failed-precondition",
+        message: "OpenRouter API key is not configured on the server.",
+      }),
     };
   }
 
@@ -107,27 +251,52 @@ exports.handler = async (event, context) => {
   let lastError = null;
 
   for (let i = 0; i < keys.length; i += 1) {
-    const model = models[i % models.length];
+    // Check cumulative timeout before trying the next provider
+    if (Date.now() - startTime >= MAX_ELAPSED_MS) {
+      lastError = new Error("Total execution time exceeded limit");
+      console.warn("Exceeded cumulative timeout, stopping failover loop.");
+      break;
+    }
+
+    // Calculate the remaining time for this provider call
+    const remainingMs = Math.max(
+      1000,
+      MAX_ELAPSED_MS - (Date.now() - startTime)
+    );
+    const providerTimeout = Math.min(REQUEST_TIMEOUT_MS, remainingMs);
+
+    // Pick a model: round-robin, fallback to first in list if models empty
+    let model;
+    if (models.length > 0) {
+      model = models[i % models.length];
+    } else {
+      model = "openrouter/auto";
+    }
+
     try {
-      const response = await fetch(API_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${keys[i]}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://friendly-ai-ad09f.firebaseapp.com",
-          "X-Title": "Friendly-AI",
+      const response = await fetchWithTimeout(
+        API_URL,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${keys[i]}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://friendly-ai-ad09f.firebaseapp.com",
+            "X-Title": "Friendly-AI",
+          },
+          body: JSON.stringify({
+            model,
+            tools: [
+              { type: "openrouter:web_search" },
+              { type: "openrouter:datetime" },
+            ],
+            messages,
+            temperature,
+            max_tokens: maxTokens,
+          }),
         },
-        body: JSON.stringify({
-          model,
-          tools: [
-            { type: "openrouter:web_search" },
-            { type: "openrouter:datetime" },
-          ],
-          messages,
-          temperature,
-          max_tokens: maxTokens,
-        }),
-      });
+        providerTimeout
+      );
 
       if (!response.ok) {
         lastError = new Error(`Provider ${i + 1} failed (${response.status})`);
@@ -137,6 +306,7 @@ exports.handler = async (event, context) => {
 
       const result = await response.json();
       const content = result?.choices?.[0]?.message?.content;
+
       if (!content) {
         lastError = new Error(`Provider ${i + 1} returned no content.`);
         continue;
@@ -146,21 +316,23 @@ exports.handler = async (event, context) => {
         statusCode: 200,
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Origin": CORS_ORIGIN,
         },
         body: JSON.stringify({ content }),
       };
     } catch (err) {
       lastError = err;
-      console.warn(`Provider ${i + 1} error:`, err.message);
+      const errorName = err.name === "AbortError" ? "timeout" : err.message;
+      console.warn(`Provider ${i + 1} error:`, errorName);
     }
   }
 
   return {
     statusCode: 503,
-    body: JSON.stringify({
-      error: "unavailable",
-      message: lastError?.message || "All AI providers failed.",
-    }),
+    headers: { "Access-Control-Allow-Origin": CORS_ORIGIN },
+      body: JSON.stringify({
+        error: "unavailable",
+        message: "All AI providers are currently unavailable.",
+      }),
   };
 };

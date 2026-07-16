@@ -3,9 +3,5 @@
   "version": "1.0.0",
   "description": "Netlify serverless functions for Friendly-AI - proxies requests to OpenRouter API securely.",
   "private": true,
-  "main": "askAI.js",
-  "dependencies": {
-    "firebase-admin": "^13.10.0",
-    "node-fetch": "^2.7.0"
-  }
+  "main": "askAI.js"
 }
