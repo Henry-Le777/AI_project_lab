@@ -75,6 +75,7 @@ async function verifyFirebaseToken(idToken) {
     throw new Error("FIREBASE_API_KEY is not configured");
   }
 
+  console.log("Has idToken:", !!idToken);
   const response = await fetchWithTimeout(
     `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
     {
@@ -87,11 +88,14 @@ async function verifyFirebaseToken(idToken) {
     3000
   );
 
+  console.log("Firebase status:", response.status);
   if (!response.ok) {
     throw new Error("Invalid or expired Firebase ID token");
   }
 
   const data = await response.json();
+  const data = JSON.parse(text);
+  console.log("Firebase response:", text);
   const user = data.users?.[0];
 
   if (!user) {
