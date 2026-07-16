@@ -93,9 +93,9 @@ async function verifyFirebaseToken(idToken) {
     throw new Error("Invalid or expired Firebase ID token");
   }
 
-  const data = await response.json();
-  const data = JSON.parse(text);
+  const text = await response.text();
   console.log("Firebase response:", text);
+  const data = JSON.parse(text);
   const user = data.users?.[0];
 
   if (!user) {
