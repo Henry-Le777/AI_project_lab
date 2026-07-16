@@ -66,6 +66,10 @@ async function verifyFirebaseToken(idToken) {
   }
 
   const apiKey = process.env.FIREBASE_API_KEY;
+  console.log("=== Environment Check ===");
+  console.log("FIREBASE_API_KEY:", process.env.FIREBASE_API_KEY ? "FOUND" : "MISSING");
+  console.log("OPENROUTER_KEYS:", process.env.OPENROUTER_KEYS ? "FOUND" : "MISSING");
+  console.log("NODE_ENV:", process.env.NODE_ENV);
 
   if (!apiKey) {
     throw new Error("FIREBASE_API_KEY is not configured");
