@@ -1,4 +1,3 @@
-
 const admin = require("firebase-admin");
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
